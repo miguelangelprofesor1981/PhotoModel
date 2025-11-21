@@ -21,14 +21,22 @@ const App: React.FC = () => {
     setError(null);
     setGeneratedImages([]);
     setSelectedImageIndex(null);
+    
+    // Basic validation
+    if (!file.type.startsWith('image/')) {
+        setError("Please upload a valid image file.");
+        return;
+    }
+
     const reader = new FileReader();
     reader.onloadend = async () => {
-      const base64Image = (reader.result as string).split(',')[1];
-      setUploadedImage(`data:image/jpeg;base64,${base64Image}`);
+      const result = reader.result as string;
+      const base64Image = result.split(',')[1];
+      setUploadedImage(result);
       
       try {
         setLoadingState({ active: true, message: 'Analyzing your garment...' });
-        const analysis = await analyzeGarment(base64Image);
+        const analysis = await analyzeGarment(base64Image, file.type);
 
         setLoadingState({ active: true, message: 'Generating model images (this may take a moment)...' });
         const imagePrompts = [
@@ -38,6 +46,10 @@ const App: React.FC = () => {
         ];
         
         const generatedImageBlobs = await generateModelImages(imagePrompts, aspectRatio);
+
+        if (generatedImageBlobs.length === 0) {
+            throw new Error("Failed to generate any images. Please try again.");
+        }
 
         setLoadingState({ active: true, message: 'Crafting style recommendations...' });
         
@@ -49,7 +61,7 @@ const App: React.FC = () => {
             description: descriptionData.description,
             recommendations: descriptionData.recommendations,
             pose: pose
-          };
+          } as GeneratedImage;
         }));
         
         setGeneratedImages(describedImages);
@@ -57,6 +69,10 @@ const App: React.FC = () => {
       } catch (err) {
         console.error(err);
         setError(err instanceof Error ? err.message : 'An unknown error occurred during image generation.');
+        // Reset uploaded image on critical failure so user can try again easily
+        if (!generatedImages.length) {
+            setUploadedImage(null);
+        }
       } finally {
         setLoadingState({ active: false, message: '' });
       }
@@ -75,7 +91,10 @@ const App: React.FC = () => {
       const editedImageBase64 = await editImage(originalImageBase64, prompt);
       
       const updatedImages = [...generatedImages];
-      updatedImages[selectedImageIndex].src = `data:image/jpeg;base64,${editedImageBase64}`;
+      updatedImages[selectedImageIndex] = {
+          ...updatedImages[selectedImageIndex],
+          src: `data:image/jpeg;base64,${editedImageBase64}`
+      };
       setGeneratedImages(updatedImages);
       
     } catch (err) {
@@ -106,7 +125,7 @@ const App: React.FC = () => {
         {loadingState.active && <Loader message={loadingState.message} />}
 
         {error && (
-          <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6" role="alert">
+          <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded shadow-sm" role="alert">
             <p className="font-bold">Error</p>
             <p>{error}</p>
           </div>
@@ -120,8 +139,8 @@ const App: React.FC = () => {
         )}
 
         {generatedImages.length > 0 && !loadingState.active && (
-          <div>
-            <h2 className="text-3xl font-bold text-center text-gray-800 mb-8">Your AI-Powered Photoshoot</h2>
+          <div className="animate-fade-in">
+            <h2 className="text-3xl font-bold text-center text-gray-800 mb-8 font-serif">Your AI-Powered Photoshoot</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
               {generatedImages.map((image, index) => (
                 <GeneratedImageCard

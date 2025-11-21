@@ -1,5 +1,5 @@
 
-import { GoogleGenAI, Type, Modality } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 import type { AspectRatio } from '../types';
 
 let ai: GoogleGenAI | undefined;
@@ -23,9 +23,9 @@ const fileToGenerativePart = (base64: string, mimeType: string) => {
   };
 };
 
-export async function analyzeGarment(base64Image: string): Promise<string> {
+export async function analyzeGarment(base64Image: string, mimeType: string = 'image/jpeg'): Promise<string> {
   const model = 'gemini-2.5-flash';
-  const imagePart = fileToGenerativePart(base64Image, 'image/jpeg');
+  const imagePart = fileToGenerativePart(base64Image, mimeType);
   const prompt = `Analyze the image of this woman's clothing item. Provide a detailed description covering its type, style, color, fabric, and overall vibe. Focus on creating a rich description that can be used to generate a new image of a model wearing it.`;
 
   const response = await getAi().models.generateContent({
@@ -33,7 +33,7 @@ export async function analyzeGarment(base64Image: string): Promise<string> {
     contents: { parts: [imagePart, { text: prompt }] },
   });
 
-  return response.text;
+  return response.text || "A stylish garment.";
 }
 
 export async function generateModelImages(prompts: string[], aspectRatio: AspectRatio): Promise<string[]> {
@@ -48,11 +48,18 @@ export async function generateModelImages(prompts: string[], aspectRatio: Aspect
           outputMimeType: 'image/jpeg',
           aspectRatio: aspectRatio,
         }
+      }).catch(e => {
+        console.error("Error generating individual image:", e);
+        return null;
       })
     );
 
     const results = await Promise.all(imagePromises);
-    return results.map(res => res.generatedImages[0].image.imageBytes);
+    
+    // Filter out failed requests and extract image bytes safely
+    return results
+      .map(res => res?.generatedImages?.[0]?.image?.imageBytes)
+      .filter((bytes): bytes is string => !!bytes);
 }
 
 export async function describeGeneratedImage(base64Image: string): Promise<{ description: string; recommendations: string }> {
@@ -77,12 +84,19 @@ export async function describeGeneratedImage(base64Image: string): Promise<{ des
   });
 
   try {
-    // Clean up potential markdown backticks
-    const cleanedText = response.text.replace(/```json/g, '').replace(/```/g, '').trim();
-    return JSON.parse(cleanedText);
+    // Clean up potential markdown backticks just in case, though responseMimeType usually handles it
+    const text = response.text || "{}";
+    const jsonStartIndex = text.indexOf('{');
+    const jsonEndIndex = text.lastIndexOf('}');
+    
+    if (jsonStartIndex === -1 || jsonEndIndex === -1) {
+        throw new Error("No JSON found in response");
+    }
+    
+    const jsonStr = text.substring(jsonStartIndex, jsonEndIndex + 1);
+    return JSON.parse(jsonStr);
   } catch (e) {
     console.error("Failed to parse JSON from Gemini:", response.text);
-    // Fallback in case of parsing error
     return {
       description: "A stylish and modern outfit.",
       recommendations: "Suitable for mild weather conditions."
@@ -102,15 +116,15 @@ export async function editImage(base64Image: string, prompt: string): Promise<st
           { text: prompt },
         ],
       },
-      config: {
-        responseModalities: [Modality.IMAGE],
-      },
     });
 
-    const firstPart = response.candidates?.[0]?.content?.parts[0];
-    if (firstPart && 'inlineData' in firstPart && firstPart.inlineData) {
-        return firstPart.inlineData.data;
+    // Iterate through all parts to find the image, as per guidelines
+    const parts = response.candidates?.[0]?.content?.parts || [];
+    for (const part of parts) {
+        if (part.inlineData && part.inlineData.data) {
+            return part.inlineData.data;
+        }
     }
 
-    throw new Error("Could not extract edited image from API response.");
+    throw new Error("Could not extract edited image from API response. The model may have returned text instead.");
 }
