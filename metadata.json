@@ -1,0 +1,7 @@
+{
+  "name": "PhotoModel-IA",
+  "description": "Upload a photo of a woman's clothing item, analyze it with AI, and generate three images of an AI model wearing the garment in different poses with style recommendations. Select a generated image and use text prompts to iterate on the design.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
